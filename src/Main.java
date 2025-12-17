@@ -643,7 +643,3 @@ class SJFExpected {
     List<ProcessResult> processResults;
     double averageWaitingTime, averageTurnaroundTime;
 }
-
-
-
-

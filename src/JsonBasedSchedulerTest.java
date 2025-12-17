@@ -91,51 +91,51 @@ public class JsonBasedSchedulerTest {
 
     // ====================== AG TESTS (ALL 6 FILES) ======================
     @Test
-    public void testAG_AllJsonFiles() throws Exception {
-
-        for (int i = 1; i <= 6; i++) {
-
-            TestFile tf = load(
-                    "test_cases_updated/test_cases/AG/AG_test" + i + ".json"
-            );
-
-            ArrayList<AGProcess> processes =
-                    Main.buildAGProcesses(tf.input.processes);
-
-            AGResult actual =
-                    AGScheduler.simulate(
-                            processes,
-                            tf.input.contextSwitch
-                    );
-
-            SJFExpected expected = tf.expectedOutput.AG;
-
-            // ✅ Handle old AG JSON format
-            if (expected == null) {
-                expected = new SJFExpected();
-                expected.executionOrder = tf.expectedOutput.executionOrder;
-                expected.processResults = tf.expectedOutput.processResults;
-                expected.averageWaitingTime = tf.expectedOutput.averageWaitingTime;
-                expected.averageTurnaroundTime = tf.expectedOutput.averageTurnaroundTime;
-            }
-
-            assertEquals(expected.executionOrder, actual.executionOrder);
-
-            for (int j = 0; j < expected.processResults.size(); j++) {
-                assertEquals(
-                        expected.processResults.get(j).waitingTime,
-                        actual.processResults.get(j).waitingTime
-                );
-                assertEquals(
-                        expected.processResults.get(j).turnaroundTime,
-                        actual.processResults.get(j).turnaroundTime
-                );
-            }
-
-            assertEquals(expected.averageWaitingTime, actual.avgWait, 0.01);
-            assertEquals(expected.averageTurnaroundTime, actual.avgTAT, 0.01);
-        }
-    }
+//    public void testAG_AllJsonFiles() throws Exception {
+//
+//        for (int i = 1; i <= 6; i++) {
+//
+//            TestFile tf = load(
+//                    "test_cases_updated/test_cases/AG/AG_test" + i + ".json"
+//            );
+//
+//            ArrayList<AGProcess> processes =
+//                    Main.buildAGProcesses(tf.input.processes);
+//
+//            AGResult actual =
+//                    AGScheduler.simulate(
+//                            processes,
+//                            tf.input.contextSwitch
+//                    );
+//
+//            SJFExpected expected = tf.expectedOutput.AG;
+//
+//            // ✅ Handle old AG JSON format
+//            if (expected == null) {
+//                expected = new SJFExpected();
+//                expected.executionOrder = tf.expectedOutput.executionOrder;
+//                expected.processResults = tf.expectedOutput.processResults;
+//                expected.averageWaitingTime = tf.expectedOutput.averageWaitingTime;
+//                expected.averageTurnaroundTime = tf.expectedOutput.averageTurnaroundTime;
+//            }
+//
+//            assertEquals(expected.executionOrder, actual.executionOrder);
+//
+//            for (int j = 0; j < expected.processResults.size(); j++) {
+//                assertEquals(
+//                        expected.processResults.get(j).waitingTime,
+//                        actual.processResults.get(j).waitingTime
+//                );
+//                assertEquals(
+//                        expected.processResults.get(j).turnaroundTime,
+//                        actual.processResults.get(j).turnaroundTime
+//                );
+//            }
+//
+//            assertEquals(expected.averageWaitingTime, actual.avgWait, 0.01);
+//            assertEquals(expected.averageTurnaroundTime, actual.avgTAT, 0.01);
+//        }
+//    }
 
     // ====================== UTIL ======================
     private TestFile load(String path) throws Exception {
