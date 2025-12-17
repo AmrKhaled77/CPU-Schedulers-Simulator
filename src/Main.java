@@ -124,7 +124,8 @@ public class Main {
             processes.add(new AGProcess(name, arrival, burst, priority, quantum));
         }
 
-        AGResult result = AGScheduler.simulate(processes, cs);
+        AGScheduler scheduler = new AGScheduler(processes, cs);
+        AGResult result = scheduler.simulate();
 
         System.out.println("\n========= AG SCHEDULER OUTPUT =========");
         System.out.println("Execution Order: " + result.executionOrder);
@@ -206,9 +207,8 @@ public class Main {
             ArrayList<AGProcess> ag =
                     buildAGProcesses(testFile.input.processes);
 
-            AGResult result =
-                    AGScheduler.simulate(ag, cs);
-
+            AGScheduler scheduler = new AGScheduler(ag, cs);
+            AGResult result = scheduler.simulate();
             printCompareWithPassFail("AG", result, testFile.expectedOutput.AG);
         }
     }
@@ -356,168 +356,166 @@ class RoundRobin {
 
 // ======================= AG SCHEDULER (FIXED) =======================
 class AGScheduler {
+    private List<AGProcess> processes;
+    private int contextSwitchTime;
 
-    static AGResult simulate(List<AGProcess> processes, int contextSwitch) {
-        Deque<AGProcess> ready = new LinkedList<>();
+    public AGScheduler(List<AGProcess> processes, int contextSwitchTime) {
+        this.processes = processes;
+        this.contextSwitchTime = contextSwitchTime;
+    }
+
+    public AGResult simulate() {
+        System.out.println("Running AG Scheduling...");
+
+        int currentTime = 0;
+        int completedProcesses = 0;
         List<String> executionOrder = new ArrayList<>();
+        String lastProcessName = "";
 
-        int time = 0;
-        int completedCount = 0;
-        int n = processes.size();
+        Queue<AGProcess> readyQueue = new LinkedList<>();
+        Set<AGProcess> arrivedProcesses = new HashSet<>();
 
-        processes.sort(Comparator.comparingInt(p -> p.arrival));
-        int processIndex = 0;
+        AGProcess currentProcess = null;
+        int timeByCurrentProcess = 0;
 
-        AGProcess cur = null;
+        while (completedProcesses < processes.size()) {
 
-        while (completedCount < n) {
-            while (processIndex < n && processes.get(processIndex).arrival <= time) {
-                ready.add(processes.get(processIndex));
-                processes.get(processIndex).added = true;
-                processIndex++;
+            // 1. Check Arrivals
+            for (AGProcess p : processes) {
+                if (p.getArrivalTime() <= currentTime && !arrivedProcesses.contains(p)) {
+                    readyQueue.add(p);
+                    arrivedProcesses.add(p);
+                }
             }
 
-            if (cur == null) {
-                if (ready.isEmpty()) {
-                    time++;
+            // 2. Select Process if Idle
+            if (currentProcess == null) {
+                if (!readyQueue.isEmpty()) {
+                    currentProcess = readyQueue.poll();
+                    timeByCurrentProcess = 0;
+                } else {
+                    currentTime++;
                     continue;
                 }
-                cur = ready.poll();
             }
 
-            executionOrder.add(cur.name);
+            // 3. Record Execution Order
+            if (!currentProcess.getName().equals(lastProcessName)) {
+                executionOrder.add(currentProcess.getName());
+                lastProcessName = currentProcess.getName();
+            }
 
-            int q = cur.quantum;
-            int limitF1 = (int) Math.ceil(q * 0.25);
-            int limitF2 = (int) Math.ceil(q * 0.50);
+            int q = currentProcess.getQuantum();
+            int limit25 = (int) Math.ceil(q * 0.25);
+            int limit50 = limit25 + limit25;
 
-            int timeSlice = 0;
-            boolean finished = false;
             boolean preempted = false;
 
-            // --- PHASE 1: FCFS ---
-            while (timeSlice < limitF1) {
-                cur.remaining--;
-                timeSlice++;
-                time++;
+            // 4. Zone 2: Priority Preemption
+            if (timeByCurrentProcess >= limit25 && timeByCurrentProcess < limit50) {
+                AGProcess bestPriorityProcess = getBestPriorityProcess(readyQueue);
 
-                while (processIndex < n && processes.get(processIndex).arrival <= time) {
-                    ready.add(processes.get(processIndex));
-                    processes.get(processIndex).added = true;
-                    processIndex++;
-                }
-
-                if (cur.remaining == 0) {
-                    cur.finish(time);
-                    completedCount++;
-                    cur = null;
-                    finished = true;
-                    break;
-                }
-            }
-
-            if (finished) continue;
-
-            // --- PHASE 2: Priority ---
-            while (timeSlice < limitF2) {
-                AGProcess higher = null;
-                for (AGProcess p : ready) {
-                    if (p.priority < cur.priority) {
-                        if (higher == null || p.priority < higher.priority) {
-                            higher = p;
-                        }
-                    }
-                }
-
-                if (higher != null) {
-                    int unused = q - timeSlice;
-                    cur.quantum += (int) Math.ceil(unused / 2.0);
-                    cur.quantumHistory.add(cur.quantum);
-
-                    ready.add(cur);
-                    ready.remove(higher);
-                    ready.addFirst(higher);
-
-                    cur = null;
+                if (bestPriorityProcess != null && bestPriorityProcess.getPriority() < currentProcess.getPriority()) {
                     preempted = true;
-                    break;
-                }
+                    int unused = q - timeByCurrentProcess;
+                    int nextQuantum = q + (int) Math.ceil(unused / 2.0);
 
-                cur.remaining--;
-                timeSlice++;
-                time++;
-
-                while (processIndex < n && processes.get(processIndex).arrival <= time) {
-                    ready.add(processes.get(processIndex));
-                    processes.get(processIndex).added = true;
-                    processIndex++;
-                }
-
-                if (cur.remaining == 0) {
-                    cur.finish(time);
-                    completedCount++;
-                    cur = null;
-                    finished = true;
-                    break;
+                    preemptive(currentProcess, nextQuantum, readyQueue);
+                    currentProcess = bestPriorityProcess;
+                    readyQueue.remove(currentProcess);
+                    timeByCurrentProcess = 0;
                 }
             }
+            // 5. Zone 3: SJF Preemption
+            else if (timeByCurrentProcess >= limit50) {
+                AGProcess shortestProcess = getShortestProcess(readyQueue);
 
-            if (finished || preempted) continue;
-
-            // --- PHASE 3: SJF ---
-            while (timeSlice < q) {
-                AGProcess shorter = null;
-                for (AGProcess p : ready) {
-                    if (p.remaining < cur.remaining) {
-                        if (shorter == null || p.remaining < shorter.remaining) {
-                            shorter = p;
-                        }
-                    }
-                }
-
-                if (shorter != null) {
-                    int unused = q - timeSlice;
-                    cur.quantum += unused;
-                    cur.quantumHistory.add(cur.quantum);
-
-                    ready.add(cur);
-                    ready.remove(shorter);
-                    ready.addFirst(shorter);
-
-                    cur = null;
+                if (shortestProcess != null && shortestProcess.getRemainingTime() < currentProcess.getRemainingTime()) {
                     preempted = true;
-                    break;
-                }
+                    int unused = q - timeByCurrentProcess;
+                    int nextQuantum = q + unused;
 
-                cur.remaining--;
-                timeSlice++;
-                time++;
-
-                while (processIndex < n && processes.get(processIndex).arrival <= time) {
-                    ready.add(processes.get(processIndex));
-                    processes.get(processIndex).added = true;
-                    processIndex++;
-                }
-
-                if (cur.remaining == 0) {
-                    cur.finish(time);
-                    completedCount++;
-                    cur = null;
-                    finished = true;
-                    break;
+                    preemptive(currentProcess, nextQuantum, readyQueue);
+                    currentProcess = shortestProcess;
+                    readyQueue.remove(currentProcess);
+                    timeByCurrentProcess = 0;
                 }
             }
 
-            if (finished || preempted) continue;
+            // 6. Handle Preemption
+            if (preempted) {
+                continue;
+            }
 
-            // --- PHASE 4: Quantum Exhausted ---
-            cur.quantum += 2;
-            cur.quantumHistory.add(cur.quantum);
-            ready.add(cur);
-            cur = null;
+            // 7. Execution Step
+            currentProcess.setRemainingTime(currentProcess.getRemainingTime() - 1);
+            timeByCurrentProcess++;
+            currentTime++;
+
+            // 8. Completion Check
+            if (currentProcess.isComplete()) {
+                currentProcess.setCompletionTime(currentTime);
+                updateQuantum(currentProcess, 0);
+                completedProcesses++;
+                currentProcess = null;
+
+                if (!readyQueue.isEmpty() && completedProcesses < processes.size()) {
+                    currentTime += contextSwitchTime;
+                }
+            }
+            // 9. Quantum Expiry
+            else if (timeByCurrentProcess == q) {
+                int nextQuantum = q + 2;
+                updateQuantum(currentProcess, nextQuantum);
+                readyQueue.add(currentProcess);
+                currentProcess = null;
+
+                if(!readyQueue.isEmpty()) {
+                    currentTime += contextSwitchTime;
+                }
+            }
         }
 
+        calculateTimes();
+
         return AGResultBuilder.build(processes, executionOrder);
+    }
+
+    private void calculateTimes() {
+        for (AGProcess p : processes) {
+            p.setTurnaroundTime(p.getCompletionTime() - p.getArrivalTime());
+            p.setWaitingTime(p.getTurnaroundTime() - p.getBurstTime());
+        }
+    }
+
+    private void preemptive(AGProcess p, int nextQuantum, Queue<AGProcess> readyQueue) {
+        updateQuantum(p, nextQuantum);
+        readyQueue.add(p);
+    }
+
+    private AGProcess getBestPriorityProcess(Queue<AGProcess> queue) {
+        AGProcess bestProcess = null;
+        for (AGProcess p : queue) {
+            if (bestProcess == null || p.getPriority() < bestProcess.getPriority()) {
+                bestProcess = p;
+            }
+        }
+        return bestProcess;
+    }
+
+    private AGProcess getShortestProcess(Queue<AGProcess> queue) {
+        AGProcess shortestProcess = null;
+        for (AGProcess p : queue) {
+            if (shortestProcess == null || p.getRemainingTime() < shortestProcess.getRemainingTime()) {
+                shortestProcess = p;
+            }
+        }
+        return shortestProcess;
+    }
+
+    private void updateQuantum(AGProcess p, int newQuantum) {
+        p.setQuantum(newQuantum);
+        p.addQuantumToHistory(newQuantum);
     }
 }
 
@@ -545,23 +543,40 @@ class Process {
 }
 
 class AGProcess extends Process {
-    int quantum;
-    boolean added = false;
-    List<Integer> quantumHistory = new ArrayList<>();
+    private int quantum;
+    private List<Integer> quantumHistory;
 
-    AGProcess(String n, int a, int b, int p, int q) {
-        super(n,a,b,p);
-        this.quantum = q;
-        this.quantumHistory.add(q);
+    public AGProcess(String name, int arrivalTime, int burstTime, int priority, int quantum) {
+        super(name, arrivalTime, burstTime, priority); // Initialize parent fields
+        this.quantum = quantum;
+        this.quantumHistory = new ArrayList<>();
+        this.quantumHistory.add(quantum);
     }
-    void finish(int time) {
-        completedTime = time;
-        turnaround = time - arrival;
-        waiting = turnaround - burst;
-        quantum = 0;
-        quantumHistory.add(0);
-    }
+
+    // Getters mapping to parent fields
+    public String getName() { return name; }
+    public int getArrivalTime() { return arrival; }
+    public int getBurstTime() { return burst; }
+    public int getRemainingTime() { return remaining; }
+    public int getPriority() { return priority; }
+    public int getQuantum() { return quantum; }
+    public int getWaitingTime() { return waiting; }
+    public int getTurnaroundTime() { return turnaround; }
+    public int getCompletionTime() { return completedTime; }
+    public List<Integer> getQuantumHistory() { return quantumHistory; }
+
+    // Setters mapping to parent fields
+    public void setRemainingTime(int remainingTime) { this.remaining = remainingTime; }
+    public void setQuantum(int quantum) { this.quantum = quantum; }
+    public void setWaitingTime(int waitingTime) { this.waiting = waitingTime; }
+    public void setTurnaroundTime(int turnaroundTime) { this.turnaround = turnaroundTime; }
+    public void setCompletionTime(int completionTime) { this.completedTime = completionTime; }
+    public void setQuantumHistory(List<Integer> quantumHistory) { this.quantumHistory = quantumHistory; }
+
+    public void addQuantumToHistory(int quantum) { quantumHistory.add(quantum); }
+    public boolean isComplete() { return remaining == 0; }
 }
+
 
 class ProcessResult {
     String name;
@@ -593,8 +608,8 @@ class AGResultBuilder {
     static AGResult build(List<AGProcess> processes, List<String> order) {
         double tw = 0, tt = 0; List<ProcessResult> res = new ArrayList<>();
         for (AGProcess p : processes) {
-            res.add(new ProcessResult(p.name, p.waiting, p.turnaround, p.quantumHistory));
-            tw += p.waiting; tt += p.turnaround;
+            res.add(new ProcessResult(p.getName(), p.getWaitingTime(), p.getTurnaroundTime(), p.getQuantumHistory()));
+            tw += p.getWaitingTime(); tt += p.getTurnaroundTime();
         }
         return new AGResult(order, res, tw / processes.size(), tt / processes.size());
     }
