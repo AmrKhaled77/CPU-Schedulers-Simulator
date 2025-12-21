@@ -15,10 +15,19 @@ public class Main {
         System.out.println("============================================");
         System.out.println("CPU Scheduling Simulator");
         System.out.println("============================================");
+
+
+        System.out.println("============================================");
+
+        System.out.println("to run unit test pleas run JsonBasedSchedulerTest file  ");
+        System.out.println("============================================");
         System.out.println("1 - Run Priority Scheduling (Manual)");
         System.out.println("2 - Enter processes manually (SJF & RR)");
         System.out.println("3 - Run AG Scheduler (Manual)");
-        System.out.println("4 - Run Unit Tests (Compare Only)");
+        System.out.println("4 - Run Compare test Manual ");
+
+
+
         System.out.print("Choose option: ");
 
         int choice = sc.nextInt();
@@ -32,7 +41,7 @@ public class Main {
         } else if (choice == 4) {
             runUnitTests(gson);
         } else {
-            System.out.println("Invalid choice ❌");
+            System.out.println("Invalid choice ");
         }
 
         sc.close();
@@ -427,123 +436,190 @@ class RoundRobin {
 }
 
 // ======================= PREEMPTIVE PRIORITY WITH AGING =======================
-class PreemptivePriority {
 
-    static class PriorityProcess extends Process {
-        int originalPriority;
-        int effectivePriority;
-        int timeInReadyQueue;
-        int lastReadyQueueEntry;
 
-        PriorityProcess(String n, int a, int b, int p) {
-            super(n, a, b, p);
-            this.originalPriority = p;
-            this.effectivePriority = p;
-            this.timeInReadyQueue = 0;
-            this.lastReadyQueueEntry = -1;
-        }
 
-        void updatePriority(int agingInterval) {
-            if (agingInterval > 0) {
-                int reduction = (int) Math.floor((double) timeInReadyQueue / agingInterval);
-                // Lower number = higher priority, so we subtract
-                effectivePriority = originalPriority - reduction;
-                // Ensure priority doesn't go below 0
-                if (effectivePriority < 0) effectivePriority = 0;
-            }
+
+
+
+ class PreemptivePriorityScheduling {
+
+    List<Process> processes = new ArrayList<>();
+    List<Process> executionOrder = new ArrayList<>();
+
+    int agingInterval;
+    int contextSwitch;
+
+    public PreemptivePriorityScheduling(
+            List<Process> inputProcesses,
+            int agingInterval,
+            int contextSwitch
+    ) {
+        this.agingInterval = agingInterval;
+        this.contextSwitch = contextSwitch;
+
+        for (Process p : inputProcesses) {
+            Process np = new Process(p.name, p.arrival, p.burst, p.priority);
+            np.tempArrival = p.arrival;
+            processes.add(np);
         }
     }
 
-    static SJFResult simulatePriority(ArrayList<Process> processes, int cs, int agingInterval) {
-        int time = 0, completed = 0;
-        String last = "";
-        List<String> order = new ArrayList<>();
+    public void execute() {
 
-        // Convert to PriorityProcess
-        ArrayList<PriorityProcess> procs = new ArrayList<>();
-        for (Process p : processes) {
-            procs.add(new PriorityProcess(p.name, p.arrival, p.burst, p.priority));
+        // Min priority number = higher priority
+        PriorityQueue<Process> readyQueue = new PriorityQueue<>(
+                (p1, p2) -> {
+                    if (p1.priority != p2.priority)
+                        return Integer.compare(p1.priority, p2.priority);
+                    if (p1.arrival != p2.arrival)
+                        return Integer.compare(p1.arrival, p2.arrival);
+                    return p1.name.compareTo(p2.name);
+                }
+        );
+
+        processes.sort(Comparator.comparingInt(p -> p.arrival));
+
+        int currentTime = processes.get(0).arrival;
+        int i = 0;
+
+        // Add initially arrived processes
+        while (i < processes.size() && processes.get(i).arrival == currentTime) {
+            readyQueue.add(processes.get(i));
+            i++;
         }
 
-        procs.sort(Comparator.comparingInt(p -> p.arrival));
-        PriorityProcess currentProcess = null;
+        String lastProcess = "";
 
-        while (completed < procs.size()) {
-            // Update time in ready queue and priorities for all waiting processes
-            for (PriorityProcess p : procs) {
-                if (p.arrival <= time && p.remaining > 0 && p != currentProcess) {
-                    if (p.lastReadyQueueEntry == -1) {
-                        p.lastReadyQueueEntry = time;
-                    }
-                    p.timeInReadyQueue = time - p.lastReadyQueueEntry;
-                    p.updatePriority(agingInterval);
-                }
+        while (!readyQueue.isEmpty() || i < processes.size()) {
+
+            Process current = null;
+            String currentName = "Null";
+
+            if (!readyQueue.isEmpty()) {
+                current = readyQueue.poll();
+                executionOrder.add(current);
+                currentName = current.name;
             }
 
-            // Find process with highest priority (lowest priority number)
-            PriorityProcess selected = null;
-            for (PriorityProcess p : procs) {
-                if (p.arrival <= time && p.remaining > 0) {
-                    if (selected == null ||
-                            p.effectivePriority < selected.effectivePriority ||
-                            (p.effectivePriority == selected.effectivePriority &&
-                                    p.arrival < selected.arrival)) {
-                        selected = p;
+            // Handle context switch
+            if (!lastProcess.isEmpty() &&
+                    !lastProcess.equals(currentName) &&
+                    !lastProcess.equals("Null")) {
+
+                if (current != null)
+                    readyQueue.add(current);
+
+                for (int c = 0; c < contextSwitch; c++) {
+                    currentTime++;
+                    applyAging(readyQueue, currentTime);
+
+                    while (i < processes.size() &&
+                            processes.get(i).arrival == currentTime) {
+                        readyQueue.add(processes.get(i));
+                        i++;
                     }
                 }
-            }
-
-            if (selected == null) {
-                time++;
-                last = "";
-                currentProcess = null;
+                lastProcess = currentName;
                 continue;
             }
 
-            // Context switch if changing processes
-            if (!last.equals("") && !last.equals(selected.name)) {
-                time += cs;
+            lastProcess = currentName;
+            currentTime++;
+
+            if (current != null)
+                current.remaining--;
+
+            applyAging(readyQueue, currentTime);
+
+            while (i < processes.size() &&
+                    processes.get(i).arrival == currentTime) {
+                readyQueue.add(processes.get(i));
+                i++;
             }
 
-            // Add to execution order if starting a new process
-            if (!selected.name.equals(last)) {
-                order.add(selected.name);
-            }
+            if (current == null)
+                continue;
 
-            // Execute for 1 time unit
-            selected.remaining--;
-            time++;
-            last = selected.name;
-            currentProcess = selected;
-
-            // Reset ready queue tracking for currently executing process
-            selected.timeInReadyQueue = 0;
-            selected.lastReadyQueueEntry = -1;
-
-            if (selected.remaining == 0) {
-                completed++;
-                selected.turnaround = time - selected.arrival;
-                selected.waiting = selected.turnaround - selected.burst;
+            if (current.remaining > 0) {
+                current.tempArrival = currentTime;
+                readyQueue.add(current);
             } else {
-                // Mark when process will re-enter ready queue
-                selected.lastReadyQueueEntry = time;
+                current.completedTime = currentTime;
+                current.turnaround = current.completedTime - current.arrival;
+                current.waiting = current.turnaround - current.burst;
             }
         }
+    }
 
-        // Convert back to regular Process list for result
-        ArrayList<Process> resultProcesses = new ArrayList<>();
-        for (PriorityProcess pp : procs) {
-            Process p = new Process(pp.name, pp.arrival, pp.burst, pp.priority);
-            p.waiting = pp.waiting;
-            p.turnaround = pp.turnaround;
-            p.remaining = pp.remaining;
-            p.completedTime = pp.completedTime;
-            resultProcesses.add(p);
+    private void applyAging(PriorityQueue<Process> queue, int currentTime) {
+        if (agingInterval <= 0)
+            return;
+
+        List<Process> temp = new ArrayList<>(queue);
+        queue.clear();
+
+        for (Process p : temp) {
+            if ((currentTime - p.tempArrival) % agingInterval == 0) {
+                p.priority = Math.max(1, p.priority - 1);
+            }
+            queue.add(p);
         }
-
-        return ResultBuilder.build(resultProcesses, order);
     }
 }
+
+
+
+
+ class PreemptivePriority {
+
+    public static SJFResult simulatePriority(
+            ArrayList<Process> processes,
+            int contextSwitch,
+            int agingInterval
+    ) {
+
+        PreemptivePriorityScheduling scheduler =
+                new PreemptivePriorityScheduling(
+                        processes, agingInterval, contextSwitch);
+
+        scheduler.execute();
+
+        // ===== Build Execution Order =====
+        List<String> executionOrder = new ArrayList<>();
+        String last = "";
+
+        for (Process p : scheduler.executionOrder) {
+            if (!p.name.equals(last)) {
+                executionOrder.add(p.name);
+                last = p.name;
+            }
+        }
+
+        // ===== Build Process Results =====
+        List<ProcessResult> results = new ArrayList<>();
+        double totalWT = 0, totalTAT = 0;
+
+        for (Process p : scheduler.processes) {
+            ProcessResult pr =
+                    new ProcessResult(p.name, p.waiting, p.turnaround);
+
+            totalWT += p.waiting;
+            totalTAT += p.turnaround;
+
+            results.add(pr);
+        }
+
+        double avgWT = totalWT / scheduler.processes.size();
+        double avgTAT = totalTAT / scheduler.processes.size();
+
+        // ✅ Use YOUR constructor
+        return new SJFResult(executionOrder, results, avgWT, avgTAT);
+    }
+}
+
+
+
 
 // ======================= AG SCHEDULER =======================
 class AGScheduler {
@@ -745,10 +821,14 @@ class ResultBuilder {
 // ======================= MODELS =======================
 class Process {
     String name;
+
+    int tempArrival;
     int arrival, burst, priority;
     int remaining, waiting, turnaround, completedTime;
     Process(String n, int a, int b, int p) {
         name = n; arrival = a; burst = b; priority = p; remaining = b;
+
+        tempArrival=a;
     }
 }
 
